@@ -16,6 +16,10 @@
 
 打开/workspace/tools/create，粘贴web-search.py内的内容
 
+## 来源
+
+此工具的原始代码来自[此处](https://openwebui.com/t/constliakos/web_search)，加入了使用jina-reader和折叠的搜索结果标题后发布
+
 ## 贡献
 
 如果你有任何建议或改进意见，欢迎通过 GitHub 提交 Pull Request 或创建 Issue 与我们分享。感谢你的贡献！
