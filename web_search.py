@@ -2,7 +2,7 @@
 title: Web Search using SearXNG and Scrape first N Pages
 author: constLiakos with enhancements by justinh-rahb and ther3zz
 funding_url: https://github.com/xiaopa233/web_search
-version: 0.2.1
+version: 0.2.1(dev0.4)
 license: MIT
 """
 
@@ -34,17 +34,23 @@ class HelpFunctions:
     def generate_excerpt(self, content, max_length=200):
         return content[:max_length] + "..." if len(content) > max_length else content
 
-    def format_text(self, original_text):
+    def format_text(self, original_text, valves):
         soup = BeautifulSoup(original_text, "html.parser")
         formatted_text = soup.get_text(separator=" ", strip=True)
         formatted_text = unicodedata.normalize("NFKC", formatted_text)
         formatted_text = re.sub(r"\s+", " ", formatted_text)
         formatted_text = formatted_text.strip()
         formatted_text = self.remove_emojis(formatted_text)
+        if valves.REMOVE_LINKS:
+            formatted_text = self.replace_urls_with_text(formatted_text)
         return formatted_text
 
     def remove_emojis(self, text):
         return "".join(c for c in text if not unicodedata.category(c).startswith("So"))
+
+    def replace_urls_with_text(self, text, replacement="(links)"):
+        pattern = r'\(https?://[^\s]+\)'
+        return re.sub(pattern, replacement, text)
 
     def process_search_result(self, result, valves):
         title_site = self.remove_emojis(result["title"])
@@ -61,12 +67,14 @@ class HelpFunctions:
                 return None
 
         try:
-            response_site = requests.get("http://jina-reader:3000/" + url_site, timeout=20)
+            response_site = requests.get(
+                valves.JINA_READER_BASE_URL + url_site, timeout=20
+            )
             response_site.raise_for_status()
             html_content = response_site.text
 
             soup = BeautifulSoup(html_content, "html.parser")
-            content_site = self.format_text(soup.get_text(separator=" ", strip=True))
+            content_site = self.format_text(soup.get_text(separator=" ", strip=True), valves)
 
             truncated_content = self.truncate_to_n_words(
                 content_site, valves.PAGE_CONTENT_WORDS_LIMIT
@@ -86,6 +94,37 @@ class HelpFunctions:
         tokens = text.split()
         truncated_tokens = tokens[:token_limit]
         return " ".join(truncated_tokens)
+
+    def rag_process(self, context: str, valves) -> str:
+        url = "http://127.0.0.1:8080/retrieval/api/v1/process/text"
+        self.headers = {
+            "Authorization": f"Bearer {valves.OPEN_WEBUI_TOKEN}",
+            "accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        collection = str(hash(context))
+        data = {"name": "rag_search", "content": context, "collection_name": collection}
+        response = requests.post(url, headers=self.headers, json=data)
+        if response.status_code == 200:
+            return collection
+        else:
+            raise Exception(f"Error processing text: {response.json()}")
+
+    def rag_search(self, context: str, query: str, valves) -> dict:
+        collection = self.rag_process(context, valves)
+        url = "http://127.0.0.1:8080/retrieval/api/v1/query/collection"
+        data = {
+            "collection_names": [collection],
+            "query": query,
+            "k": 0,
+            "r": 0,
+            "hybrid": True,
+        }
+        response = requests.post(url, headers=self.headers, json=data)
+        if response.status_code == 200:
+            return response.json()["documents"][0]
+        else:
+            raise Exception(f"Error searching collection: {response.json()}")
 
 
 class EventEmitter:
@@ -142,6 +181,22 @@ class Tools:
         CITATION_LINKS: bool = Field(
             default=False,
             description="如果为True，则发送带有链接的自定义引用",
+        )
+        JINA_READER_BASE_URL: str = Field(
+            default="https://r.jina.ai/",
+            description="Jina Reader的基础URL",
+        )
+        RAG_ENABLE: bool = Field(
+            default=False,
+            description="是否启用RAG",
+        )
+        REMOVE_LINKS: bool = Field(
+            default=True,
+            description="检索中的返回是否移除链接",
+        )
+        OPEN_WEBUI_TOKEN: str = Field(
+            default="",
+            description="open-webui令牌",
         )
 
     def __init__(self):
@@ -215,9 +270,14 @@ class Tools:
                         result_json = future.result()
                         if result_json:
                             try:
+                                if self.valves.RAG_ENABLE:
+                                    result_json["content"] = functions.rag_search(
+                                        result_json["content"], query, self.valves
+                                    )
                                 json.dumps(result_json)
                                 results_json.append(result_json)
-                            except (TypeError, ValueError):
+                            except (TypeError, ValueError, Exception) as e:
+                                print(f"处理时出错: {str(e)}")
                                 continue
                         if len(results_json) >= self.valves.RETURNED_SCRAPPED_PAGES_NO:
                             break
@@ -232,12 +292,8 @@ class Tools:
             results_json = results_json[: self.valves.RETURNED_SCRAPPED_PAGES_NO]
 
             if self.valves.CITATION_LINKS and __event_emitter__:
-                await emitter.message(
-                    "\n<details>\n<summary>检索到的网站标题</summary>\n"
-                )
                 if len(results_json):
                     for result in results_json:
-                        await emitter.message("> " + result["title"] + "\n\n")
                         await __event_emitter__(
                             {
                                 "type": "citation",
@@ -248,10 +304,13 @@ class Tools:
                                 },
                             }
                         )
-                else:
-                    await emitter.message("> ")
-                
-                await emitter.message("\n</details>\n")
+                if len(results_json):
+                    await emitter.message(
+                        "\n<details>\n<summary>检索到的网站标题</summary>\n"
+                    )
+                    for result in results_json:
+                        await emitter.message("> " + result["title"] + "\n\n")
+                    await emitter.message("\n</details>\n")
 
         await emitter.emit(
             status="complete",
@@ -259,7 +318,7 @@ class Tools:
             done=True,
         )
 
-        return json.dumps(results_json, ensure_ascii=False)
+        return json.dumps(results_json, indent=4, ensure_ascii=False)
 
     async def get_website(
         self, url: str, __event_emitter__: Callable[[dict], Any] = None
@@ -279,7 +338,11 @@ class Tools:
         results_json = []
 
         try:
-            response_site = requests.get("http://jina-reader:3000/" + url, headers=self.headers, timeout=120)
+            response_site = requests.get(
+                self.valves.JINA_READER_BASE_URL + url,
+                headers=self.headers,
+                timeout=120,
+            )
             response_site.raise_for_status()
             html_content = response_site.text
 
@@ -341,4 +404,4 @@ class Tools:
                 done=True,
             )
 
-        return json.dumps(results_json, ensure_ascii=False)
+        return json.dumps(results_json, indent=4, ensure_ascii=False)
