@@ -11,6 +11,7 @@
 - 支持忽略特定网站的结果
 - 截断长文本以适应特定的字数限制
 - 提取和格式化网页标题、内容和摘要
+- 不可用的实验性RAG搜索
 
 ## 使用方法
 
@@ -18,7 +19,7 @@
 
 ## 来源
 
-此工具的原始代码来自[此处](https://openwebui.com/t/constliakos/web_search)，加入了使用jina-reader和折叠的搜索结果标题等新功能后发布
+此工具的原始代码来自[此处](https://openwebui.com/t/constliakos/web_search)，加入了使用jina-reader提取内容和折叠的搜索结果标题等新功能后发布
 
 ## 贡献
 

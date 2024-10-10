@@ -2,7 +2,7 @@
 title: Web Search using SearXNG and Scrape first N Pages
 author: constLiakos with enhancements by justinh-rahb and ther3zz
 funding_url: https://github.com/xiaopa233/web_search
-version: 0.2.1
+version: 0.2.1(dev0.3)
 license: MIT
 """
 
@@ -61,7 +61,7 @@ class HelpFunctions:
                 return None
 
         try:
-            response_site = requests.get("http://jina-reader:3000/" + url_site, timeout=20)
+            response_site = requests.get(valves.JINA_READER_BASE_URL + url_site, timeout=20)
             response_site.raise_for_status()
             html_content = response_site.text
 
@@ -86,6 +86,41 @@ class HelpFunctions:
         tokens = text.split()
         truncated_tokens = tokens[:token_limit]
         return " ".join(truncated_tokens)
+
+    def rag_process(self, context: str, valves) -> str:
+        url = 'http://127.0.0.1:8080/retrieval/api/v1/process/text'
+        self.headers = {
+            'Authorization': f'Bearer {valves.OPEN_WEBUI_TOKEN}',
+            'accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
+        collection = str(hash(context))
+        data = {
+            "name": "rag_search",
+            "content": context,
+            "collection_name": collection
+        }
+        response = requests.post(url, headers=self.headers, json=data)
+        if response.status_code == 200:
+            return collection
+        else:
+            raise Exception(f"Error processing text: {response.json()}")
+
+    def rag_search(self, context: str, query: str, valves) -> dict:
+        collection = self.rag_process(context, valves)
+        url = 'http://127.0.0.1:8080/retrieval/api/v1/query/collection'
+        data = {
+            "collection_names": [collection],
+            "query": query,
+            "k": 0,
+            "r": 0,
+            "hybrid": True
+        }
+        response = requests.post(url, headers=self.headers, json=data)
+        if response.status_code == 200:
+            return response.json()["documents"][0]
+        else:
+            raise Exception(f"Error searching collection: {response.json()}")
 
 
 class EventEmitter:
@@ -142,6 +177,18 @@ class Tools:
         CITATION_LINKS: bool = Field(
             default=False,
             description="如果为True，则发送带有链接的自定义引用",
+        )
+        JINA_READER_BASE_URL: str = Field(
+            default="https://r.jina.ai/",
+            description="Jina Reader的基础URL",
+        )
+        RAG_ENABLE: bool = Field(
+            default=False,
+            description="是否启用RAG",
+        )
+        OPEN_WEBUI_TOKEN: str = Field(
+            default="",
+            description="open-webui令牌",
         )
 
     def __init__(self):
@@ -215,9 +262,12 @@ class Tools:
                         result_json = future.result()
                         if result_json:
                             try:
+                                if self.valves.RAG_ENABLE:
+                                    result_json["content"] = functions.rag_search(result_json["content"], query, self.valves)
                                 json.dumps(result_json)
                                 results_json.append(result_json)
-                            except (TypeError, ValueError):
+                            except (TypeError, ValueError, Exception) as e:
+                                print(f"处理时出错: {str(e)}")
                                 continue
                         if len(results_json) >= self.valves.RETURNED_SCRAPPED_PAGES_NO:
                             break
@@ -279,7 +329,7 @@ class Tools:
         results_json = []
 
         try:
-            response_site = requests.get("http://jina-reader:3000/" + url, headers=self.headers, timeout=120)
+            response_site = requests.get(self.valves.JINA_READER_BASE_URL + url, headers=self.headers, timeout=120)
             response_site.raise_for_status()
             html_content = response_site.text
 
