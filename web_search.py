@@ -2,7 +2,7 @@
 title: Web Search using SearXNG and Scrape first N Pages
 author: constLiakos with enhancements by justinh-rahb and ther3zz
 funding_url: https://github.com/xiaopa233/web_search
-version: 0.2.1(dev0.3)
+version: 0.2.1(dev0.4)
 license: MIT
 """
 
@@ -61,7 +61,9 @@ class HelpFunctions:
                 return None
 
         try:
-            response_site = requests.get(valves.JINA_READER_BASE_URL + url_site, timeout=20)
+            response_site = requests.get(
+                valves.JINA_READER_BASE_URL + url_site, timeout=20
+            )
             response_site.raise_for_status()
             html_content = response_site.text
 
@@ -88,18 +90,14 @@ class HelpFunctions:
         return " ".join(truncated_tokens)
 
     def rag_process(self, context: str, valves) -> str:
-        url = 'http://127.0.0.1:8080/retrieval/api/v1/process/text'
+        url = "http://127.0.0.1:8080/retrieval/api/v1/process/text"
         self.headers = {
-            'Authorization': f'Bearer {valves.OPEN_WEBUI_TOKEN}',
-            'accept': 'application/json',
-            'Content-Type': 'application/json'
+            "Authorization": f"Bearer {valves.OPEN_WEBUI_TOKEN}",
+            "accept": "application/json",
+            "Content-Type": "application/json",
         }
         collection = str(hash(context))
-        data = {
-            "name": "rag_search",
-            "content": context,
-            "collection_name": collection
-        }
+        data = {"name": "rag_search", "content": context, "collection_name": collection}
         response = requests.post(url, headers=self.headers, json=data)
         if response.status_code == 200:
             return collection
@@ -108,13 +106,13 @@ class HelpFunctions:
 
     def rag_search(self, context: str, query: str, valves) -> dict:
         collection = self.rag_process(context, valves)
-        url = 'http://127.0.0.1:8080/retrieval/api/v1/query/collection'
+        url = "http://127.0.0.1:8080/retrieval/api/v1/query/collection"
         data = {
             "collection_names": [collection],
             "query": query,
             "k": 0,
             "r": 0,
-            "hybrid": True
+            "hybrid": True,
         }
         response = requests.post(url, headers=self.headers, json=data)
         if response.status_code == 200:
@@ -263,7 +261,9 @@ class Tools:
                         if result_json:
                             try:
                                 if self.valves.RAG_ENABLE:
-                                    result_json["content"] = functions.rag_search(result_json["content"], query, self.valves)
+                                    result_json["content"] = functions.rag_search(
+                                        result_json["content"], query, self.valves
+                                    )
                                 json.dumps(result_json)
                                 results_json.append(result_json)
                             except (TypeError, ValueError, Exception) as e:
@@ -282,12 +282,8 @@ class Tools:
             results_json = results_json[: self.valves.RETURNED_SCRAPPED_PAGES_NO]
 
             if self.valves.CITATION_LINKS and __event_emitter__:
-                await emitter.message(
-                    "\n<details>\n<summary>检索到的网站标题</summary>\n"
-                )
                 if len(results_json):
                     for result in results_json:
-                        await emitter.message("> " + result["title"] + "\n\n")
                         await __event_emitter__(
                             {
                                 "type": "citation",
@@ -298,10 +294,14 @@ class Tools:
                                 },
                             }
                         )
-                else:
-                    await emitter.message("> ")
-                
-                await emitter.message("\n</details>\n")
+            else:
+                if len(results_json):
+                    await emitter.message(
+                        "\n<details>\n<summary>检索到的网站标题</summary>\n"
+                    )
+                    for result in results_json:
+                        await emitter.message("> " + result["title"] + "\n\n")
+                    await emitter.message("\n</details>\n")
 
         await emitter.emit(
             status="complete",
@@ -329,7 +329,11 @@ class Tools:
         results_json = []
 
         try:
-            response_site = requests.get(self.valves.JINA_READER_BASE_URL + url, headers=self.headers, timeout=120)
+            response_site = requests.get(
+                self.valves.JINA_READER_BASE_URL + url,
+                headers=self.headers,
+                timeout=120,
+            )
             response_site.raise_for_status()
             html_content = response_site.text
 
@@ -391,4 +395,4 @@ class Tools:
                 done=True,
             )
 
-        return json.dumps(results_json, ensure_ascii=False)
+        return json.dumps(results_json, indent=4, ensure_ascii=False)
