@@ -259,7 +259,7 @@ class Tools:
             done=True,
         )
 
-        return json.dumps(results_json, ensure_ascii=False)
+        return json.dumps(results_json, indent=4, ensure_ascii=False)
 
     async def get_website(
         self, url: str, __event_emitter__: Callable[[dict], Any] = None
